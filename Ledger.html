@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Digital Khata Ledger</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <style>
+        body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #333; }
+        header { background: #1e88e5; color: #fff; padding: 15px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .container { display: flex; flex-direction: column; }
+        @media (min-width: 768px) { .container { flex-direction: row; } }
+        .sidebar { width: 100%; background: #222; color: #fff; }
+        @media (min-width: 768px) { .sidebar { width: 220px; min-height: 100vh; } }
+        .sidebar button { width: 100%; padding: 15px; border: none; background: none; color: #fff; text-align: left; cursor: pointer; border-bottom: 1px solid #333; font-size: 16px; transition: 0.3s; }
+        .sidebar button:hover { background: #444; }
+        .sidebar button.active { background: #1e88e5; }
+        .main { flex: 1; padding: 20px; }
+        .hidden { display: none; }
+        
+        /* Dashboard UI */
+        .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-top: 4px solid #1e88e5; }
+        .card h3 { margin: 0; font-size: 14px; color: #777; text-transform: uppercase; }
+        .card p { font-size: 24px; font-weight: bold; margin: 10px 0 0 0; }
+        
+        .green { color: #2e7d32; }
+        .red { color: #c62828; }
+        
+        .form-group { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); max-width: 500px; margin-bottom: 20px; }
+        input, select, button { padding: 12px; margin: 8px 0; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+        button { background: #1e88e5; color: white; border: none; font-weight: bold; cursor: pointer; }
+        button:hover { background: #1565c0; }
+        
+        .status-msg { font-size: 14px; margin-top: 10px; font-weight: bold; padding: 10px; border-radius: 4px; position: fixed; top: 20px; right: 20px; z-index: 1000; }
+        .loading { background: #e3f2fd; color: #1e88e5; }
+        .success { background: #e8f5e9; color: #2e7d32; }
+        
+        .table-container { background: #fff; padding: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        table th, table td { border: 1px solid #eee; padding: 12px; text-align: left; font-size: 14px; }
+        table th { background: #f8f9fa; color: #555; }
+        .text-right { text-align: right; }
+        
+        /* PDF Report Area Styling */
+        #pdf-area { background: #ffffff; padding: 30px; color: #000; border: 1px solid #ddd; border-radius: 8px; margin-top: 20px; }
+        .pdf-header { border-bottom: 3px solid #1e88e5; margin-bottom: 20px; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-start; }
+        .pdf-summary-bar { background: #f1f1f1; padding: 12px; border-radius: 4px; margin-bottom: 20px; font-size: 16px; display: flex; gap: 25px; font-weight: 600; }
+        .pdf-footer { margin-top: 40px; border-top: 1px solid #eee; padding-top: 15px; font-size: 12px; text-align: center; color: #888; }
+
+        @media print {
+            header, .sidebar, .no-print, .cards, .form-group, #refreshBtn { display: none !important; }
+            body { background: #fff; }
+            .main { padding: 0; width: 100%; }
+            #pdf-area { border: none; padding: 0; margin: 0; }
+        }
+    </style>
+</head>
+<body>
+
+<header class="no-print">
+    <h2>🧾 Digital Khata Ledger</h2>
+</header>
+
+<div class="container">
+    <div class="sidebar no-print">
+        <button id="btn-dashboard" onclick="showSection('dashboard')" class="active">📊 Dashboard</button>
+        <button id="btn-customers" onclick="showSection('customers')">👥 Customers</button>
+        <button id="btn-entry" onclick="showSection('entry')">➕ Add Entry</button>
+        <button id="btn-ledger" onclick="showSection('ledger')">📄 Ledger</button>
+    </div>
+
+    <div class="main">
+        <div id="status-display" class="status-msg hidden"></div>
+
+        <!-- Dashboard -->
+        <div id="dashboard">
+            <!-- These Cards are for screen only, hidden in PDF -->
+            <div class="cards no-print">
+                <div class="card"><h3>Total Credit</h3><p id="totalCredit">0</p></div>
+                <div class="card"><h3>Total Paid</h3><p id="totalDebit" class="green">0</p></div>
+                <div class="card"><h3>Total Dues</h3><p id="totalDue" class="red">0</p></div>
+                <div class="card"><h3>Customers</h3><p id="totalCustomers">0</p></div>
+            </div>
+
+            <div class="form-group no-print" style="max-width: 100%;">
+                <h3>Search Customer Report</h3>
+                <select id="dashSearchCustomer" onchange="searchCustomerHistory()">
+                    <option value="">-- Select Customer --</option>
+                </select>
+            </div>
+
+            <!-- This is the ONLY area that will be exported -->
+            <div id="customer-report" class="hidden">
+                <div id="pdf-area">
+                    <div class="pdf-header">
+                        <div>
+                            <h1 style="margin:0; color:#1e88e5; font-size: 26px;">Customer Ledger Report</h1>
+                            <p style="margin:5px 0; color: #666;" id="rep-date-now"></p>
+                        </div>
+                        <div style="text-align:right;">
+                            <h2 id="rep-name" style="margin:0; font-size: 22px;">Customer Name</h2>
+                            <p id="rep-details" style="margin:5px 0; font-size: 14px; color: #444;"></p>
+                        </div>
+                    </div>
+
+                    <div class="pdf-summary-bar">
+                        <span>Total Credit: <span id="pdf-cr" style="color:#c62828;">0</span></span>
+                        <span>Total Paid: <span id="pdf-dr" style="color:#2e7d32;">0</span></span>
+                        <span>Balance Dues: <span id="pdf-bal">0</span></span>
+                    </div>
+
+                    <table style="width:100%; border-collapse: collapse; border: 1px solid #ddd;">
+                        <thead>
+                            <tr style="background:#1e88e5; color: white;">
+                                <th style="padding:12px; border: 1px solid #ddd; width: 15%;">Date</th>
+                                <th style="padding:12px; border: 1px solid #ddd; width: 40%;">Description</th>
+                                <th style="padding:12px; border: 1px solid #ddd; text-align: right;">Credit</th>
+                                <th style="padding:12px; border: 1px solid #ddd; text-align: right;">Debit</th>
+                                <th style="padding:12px; border: 1px solid #ddd; text-align: right;">Balance</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dashLedgerTable"></tbody>
+                    </table>
+
+                    <div class="pdf-footer">
+                        <p>This is a computer generated document. | Digital Khata Ledger</p>
+                    </div>
+                </div>
+
+                <div class="no-print" style="display:flex; gap:10px; margin-top:20px;">
+                    <button onclick="exportToPDF()" style="flex:1; background: #2e7d32; padding: 15px;">📥 Download PDF Report</button>
+                    <button onclick="window.print()" style="flex:1; background:#444; padding: 15px;">🖨️ Print Report</button>
+                </div>
+            </div>
+
+            <button onclick="fetchAllData()" id="refreshBtn" class="no-print" style="width:auto; padding:10px 20px; margin-top:20px;">🔄 Sync Data</button>
+        </div>
+
+        <!-- Other sections -->
+        <div id="customers" class="hidden">
+            <div class="form-group">
+                <h3>Add New Customer</h3>
+                <input id="cName" placeholder="Full Name">
+                <input id="cCnic" placeholder="CNIC">
+                <input id="cPhone" placeholder="Phone">
+                <button onclick="submitData('addCustomer')">Save Customer</button>
+            </div>
+            <div class="table-container">
+                <table id="customerTable">
+                    <thead><tr><th>ID</th><th>Name</th><th>CNIC</th><th>Phone</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="entry" class="hidden">
+            <div class="form-group">
+                <h3>Add New Transaction</h3>
+                <select id="entryCustomer"></select>
+                <input id="entryDesc" placeholder="Description">
+                <input id="entryAmount" type="number" placeholder="Amount">
+                <select id="entryType">
+                    <option value="Credit">Credit (Udhaar)</option>
+                    <option value="Debit">Debit (Vasooli)</option>
+                </select>
+                <button onclick="submitData('addEntry')">Submit Entry</button>
+            </div>
+        </div>
+
+        <div id="ledger" class="hidden">
+            <div class="form-group"><select id="ledgerCustomer" onchange="filterLedger()"></select></div>
+            <div class="table-container">
+                <table>
+                    <thead><tr><th>Date</th><th>Description</th><th>Credit</th><th>Debit</th><th>Balance</th></tr></thead>
+                    <tbody id="ledgerTable"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyuCVBH1eU0yeTu3RsO1raofnCZeLRmDoUrJdETLcvsWM4d9mPPbE9oZwOtR-Dc_XjO/exec"; 
+let allCustomers = [];
+let allLedgerEntries = [];
+
+function showSection(id) {
+    document.querySelectorAll('.main > div').forEach(d => { if (d.id !== 'status-display') d.classList.add('hidden'); });
+    document.querySelectorAll('.sidebar button').forEach(b => b.classList.remove('active'));
+    document.getElementById(id).classList.remove('hidden');
+    document.getElementById('btn-' + id).classList.add('active');
+}
+
+function updateStatus(msg, type = 'loading') {
+    const status = document.getElementById('status-display');
+    status.innerText = msg;
+    status.className = `status-msg ${type}`;
+    status.classList.remove('hidden');
+    if (type === 'success') setTimeout(() => status.classList.add('hidden'), 3000);
+}
+
+function getDataViaJSONP(action, callbackName) {
+    const script = document.createElement('script');
+    const cb = 'cb_' + Date.now() + Math.floor(Math.random()*100);
+    window[cb] = (data) => {
+        delete window[cb];
+        document.body.removeChild(script);
+        callbackName(data);
+    };
+    script.src = `${SCRIPT_URL}?action=${action}&callback=${cb}&t=${Date.now()}`;
+    document.body.appendChild(script);
+}
+
+function fetchAllData() {
+    updateStatus("Syncing Data...");
+    getDataViaJSONP('customers', (data) => {
+        allCustomers = data || [];
+        renderCustomerLists();
+        getDataViaJSONP('ledger', (ldata) => {
+            allLedgerEntries = ldata || [];
+            renderDashboard();
+            updateStatus("Data Updated", "success");
+        });
+    });
+}
+
+function renderCustomerLists() {
+    const table = document.querySelector('#customerTable tbody');
+    if (!table) return;
+    table.innerHTML = "";
+    const selects = ['entryCustomer', 'ledgerCustomer', 'dashSearchCustomer'];
+    selects.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = '<option value="">-- Select --</option>';
+    });
+
+    allCustomers.forEach(c => {
+        const id = c.CustomerID || c.customerId;
+        const name = c.Name || c.name;
+        table.innerHTML += `<tr><td>${id}</td><td>${name}</td><td>${c.CNIC || '-'}</td><td>${c.Phone || '-'}</td></tr>`;
+        const opt = `<option value="${id}">${name} (${id})</option>`;
+        selects.forEach(selId => {
+            const el = document.getElementById(selId);
+            if (el) el.innerHTML += opt;
+        });
+    });
+    document.getElementById('totalCustomers').innerText = allCustomers.length;
+}
+
+function renderDashboard() {
+    let cr = 0, dr = 0;
+    allLedgerEntries.forEach(e => {
+        cr += Number(e.Credit || 0);
+        dr += Number(e.Debit || 0);
+    });
+    document.getElementById('totalCredit').innerText = cr.toLocaleString();
+    document.getElementById('totalDebit').innerText = dr.toLocaleString();
+    document.getElementById('totalDue').innerText = (cr - dr).toLocaleString();
+}
+
+function submitData(action) {
+    let params = `?action=${action}`;
+    updateStatus("Saving...");
+    
+    if (action === 'addCustomer') {
+        params += `&name=${encodeURIComponent(document.getElementById('cName').value)}&cnic=${encodeURIComponent(document.getElementById('cCnic').value)}&phone=${encodeURIComponent(document.getElementById('cPhone').value)}`;
+    } else {
+        const type = document.getElementById('entryType').value;
+        const amt = document.getElementById('entryAmount').value;
+        params += `&CustomerID=${encodeURIComponent(document.getElementById('entryCustomer').value)}&Description=${encodeURIComponent(document.getElementById('entryDesc').value)}`;
+        if(type === 'Credit') params += `&Credit=${amt}&Debit=0`;
+        else params += `&Credit=0&Debit=${amt}`;
+    }
+
+    const cb = 'cb_save_' + Date.now();
+    window[cb] = () => { 
+        delete window[cb]; 
+        updateStatus("Saved!", "success"); 
+        
+        // Clear fields after success
+        if (action === 'addCustomer') {
+            document.getElementById('cName').value = '';
+            document.getElementById('cCnic').value = '';
+            document.getElementById('cPhone').value = '';
+        } else {
+            document.getElementById('entryDesc').value = '';
+            document.getElementById('entryAmount').value = '';
+            document.getElementById('entryCustomer').value = '';
+        }
+        
+        fetchAllData(); 
+    };
+    
+    const script = document.createElement('script');
+    script.src = `${SCRIPT_URL}${params}&callback=${cb}`;
+    document.body.appendChild(script);
+}
+
+function filterLedger() {
+    const cid = document.getElementById('ledgerCustomer').value;
+    const table = document.getElementById('ledgerTable');
+    if (!table || !cid) return;
+    table.innerHTML = "";
+    let bal = 0;
+    allLedgerEntries.filter(e => (e.CustomerID || e.customerId) == cid).forEach(e => {
+        const cr = Number(e.Credit || 0); const dr = Number(e.Debit || 0); bal += (cr - dr);
+        table.innerHTML += `<tr><td>${formatDisplayDate(e.Date)}</td><td>${e.Description}</td><td class="text-right red">${cr||'-'}</td><td class="text-right green">${dr||'-'}</td><td class="text-right"><strong>${bal}</strong></td></tr>`;
+    });
+}
+
+function formatDisplayDate(dateStr) {
+    try {
+        const d = new Date(dateStr);
+        return isNaN(d) ? dateStr : d.toLocaleDateString();
+    } catch(e) { return dateStr; }
+}
+
+function searchCustomerHistory() {
+    const cid = document.getElementById('dashSearchCustomer').value;
+    const area = document.getElementById('customer-report');
+    const table = document.getElementById('dashLedgerTable');
+    if(!cid) return area.classList.add('hidden');
+    
+    area.classList.remove('hidden');
+    table.innerHTML = "";
+    
+    const customer = allCustomers.find(c => (c.CustomerID || c.customerId) == cid);
+    document.getElementById('rep-name').innerText = customer ? (customer.Name || customer.name) : "Customer Report";
+    document.getElementById('rep-details').innerText = `ID: ${cid} | Phone: ${customer.Phone || 'N/A'}`;
+    document.getElementById('rep-date-now').innerText = `Report Generated: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
+
+    let bal = 0, totalCr = 0, totalDr = 0;
+    
+    allLedgerEntries.filter(e => (e.CustomerID || e.customerId) == cid).forEach(e => {
+        const cr = Number(e.Credit || 0); const dr = Number(e.Debit || 0);
+        totalCr += cr; totalDr += dr; bal += (cr - dr);
+        table.innerHTML += `<tr>
+            <td style="padding:10px; border: 1px solid #ddd;">${formatDisplayDate(e.Date)}</td>
+            <td style="padding:10px; border: 1px solid #ddd;">${e.Description}</td>
+            <td style="padding:10px; border: 1px solid #ddd; text-align: right; color: #c62828;">${cr.toLocaleString()||'0'}</td>
+            <td style="padding:10px; border: 1px solid #ddd; text-align: right; color: #2e7d32;">${dr.toLocaleString()||'0'}</td>
+            <td style="padding:10px; border: 1px solid #ddd; text-align: right;"><strong>${bal.toLocaleString()}</strong></td>
+        </tr>`;
+    });
+    
+    document.getElementById('pdf-cr').innerText = totalCr.toLocaleString();
+    document.getElementById('pdf-dr').innerText = totalDr.toLocaleString();
+    document.getElementById('pdf-bal').innerText = bal.toLocaleString();
+}
+
+function exportToPDF() {
+    const name = document.getElementById('rep-name').innerText;
+    updateStatus("Creating PDF...", "loading");
+    const element = document.getElementById('pdf-area');
+    const opt = {
+        margin:       [15, 15],
+        filename:     `Ledger_${name.replace(/\s+/g, '_')}.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+    html2pdf().set(opt).from(element).save().then(() => {
+        updateStatus("Downloaded!", "success");
+    });
+}
+
+window.onload = fetchAllData;
+</script>
+</body>
+</html>
